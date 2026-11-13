@@ -56,7 +56,7 @@ footer{padding:0 clamp(14px,3vw,48px) 34px;max-width:1760px;margin:0 auto;color:
 .amap-pin::after{content:"";position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid #263a32}
 .amap-stop-list{display:flex;gap:6px;flex-wrap:wrap;padding:9px 10px 0}
 .amap-stop-list button{border:1px solid #dfd2b6;background:#fffaf0;border-radius:999px;padding:7px 10px;font-size:11px;color:#4d5d54}
-.amap-stop-list button.active{background:#263a32;color:#fff;border-color:#263a32}
+.amap-stop-list button.active{background:#263a32;color:#fff;border-color:#263a32}.amap-stop-list button.route-hidden{display:none}
 .amap-fallback{display:none;height:540px}.amap-fallback iframe{display:block;width:100%;height:100%;border:0}
 @media(max-width:900px){#amapContainer,.amap-fallback{height:430px}}@media(max-width:520px){#amapContainer,.amap-fallback{height:340px}}
 </style></head>
@@ -107,7 +107,15 @@ service:{name:"游览服务",note:"服务层：查看索道、休息点、餐饮
 let currentRoute="half",selectedStop=1,passport=JSON.parse(localStorage.getItem("huanglingPassport")||"[]");const fmt=n=>String(n).padStart(2,"0");
 function showToast(msg){const el=document.getElementById("toast");el.textContent=msg;el.classList.add("show");clearTimeout(window._toast);window._toast=setTimeout(()=>el.classList.remove("show"),1800)}
 function routePath(ids){const pts={1:[170,520],2:[405,390],3:[640,470],4:[860,330],5:[1050,430]};const list=ids.map(i=>pts[i]);const cmds=[];for(let i=0;i<list.length;i++){if(i===0)cmds.push(`M${list[i][0]} ${list[i][1]}`);else{const p0=list[i-1],p1=list[i],mx=(p0[0]+p1[0])/2;cmds.push(`C${mx} ${p0[1]} ${mx} ${p1[1]} ${p1[0]} ${p1[1]}`)}}return cmds.join(" ")}
-function setRoute(key,fromAI=false){currentRoute=key;const r=routes[key]||routes.day;document.querySelectorAll('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===key));const path=routePath(r.stops);document.getElementById("routeMain").setAttribute("d",path);document.getElementById("routeGlow").setAttribute("d",path);document.querySelectorAll('.stop').forEach(el=>{const id=Number(el.dataset.stop);el.classList.toggle('dim',!r.stops.includes(id))});document.getElementById("mapStatus").textContent="当前："+r.name;if(fromAI)selectStop(r.stops[0])}
+function setRoute(key,fromAI=false){
+ currentRoute=key;const r=routes[key]||routes.day;
+ document.querySelectorAll('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===key));
+ const path=routePath(r.stops);document.getElementById("routeMain").setAttribute("d",path);document.getElementById("routeGlow").setAttribute("d",path);
+ document.querySelectorAll('.stop').forEach(el=>{const id=Number(el.dataset.stop);el.classList.toggle('dim',!r.stops.includes(id))});
+ document.getElementById("mapStatus").textContent="当前："+r.name;
+ updateAmapRoute(key);
+ selectStop(r.stops[0]);
+}
 function setLayer(key){const l=layers[key];document.querySelectorAll('[data-layer]').forEach(b=>b.classList.toggle('active',b.dataset.layer===key));document.getElementById("layerLabel").textContent=l.name;document.getElementById("layerNote").textContent=l.note;l.tags.forEach((t,i)=>{const el=document.getElementById("tag"+(i+1));if(el)el.textContent=t})}
 function selectStop(id){selectedStop=id;if(currentNarration){currentNarration.pause();currentNarration.currentTime=0;currentNarration=null;const sb=document.getElementById("speakBtn");if(sb)sb.textContent="自然语音讲解";} const s=stops[id];document.querySelectorAll('.stop').forEach(el=>el.classList.toggle('active',Number(el.dataset.stop)===id));document.getElementById("detailPhoto").src=photos[id];document.getElementById("detailPill").textContent=s.pill;document.querySelector('.detail-eyebrow span:first-child').textContent="STOP "+fmt(id);document.getElementById("detailTitle").textContent=s.title;document.getElementById("detailDesc").textContent=s.desc;document.getElementById("detailTime").textContent=s.time;document.getElementById("detailKeyword").textContent=s.keyword;document.getElementById("detailTip").textContent=s.tip;document.getElementById("amapLink").href="https://www.amap.com/search?query="+encodeURIComponent("婺源篁岭 "+s.title);document.getElementById("checkinBtn").textContent=passport.includes(id)?"已加入护照":"加入古村护照"}
 function updatePassport(){passport=[...new Set(passport)].sort((a,b)=>a-b);localStorage.setItem("huanglingPassport",JSON.stringify(passport));document.querySelectorAll('.stamp').forEach((el,i)=>el.classList.toggle('on',passport.includes(i+1)));document.getElementById("passportText").textContent=`${passport.length} / 5`;document.getElementById("passportBar").style.width=`${passport.length/5*100}%`;document.getElementById("checkinBtn").textContent=passport.includes(selectedStop)?"已加入护照":"加入古村护照"}
@@ -136,14 +144,27 @@ const amapStops=[
  {id:4,title:"花溪水街",keyword:"篁岭花溪水街",fallback:[118.1191,29.3203]},
  {id:5,title:"梯田花海·垒心桥",keyword:"篁岭垒心桥",fallback:[118.1204,29.3193]}
 ];
+let amapMap=null,amapMarkers={},amapRouteLine=null;
+const routeColors={half:"#b94c35",day:"#263a32",photo:"#d99a2b",study:"#344b3c",rain:"#4b8e8f"};
+function updateAmapRoute(key){
+ if(!amapMap)return;
+ const r=routes[key]||routes.day;
+ Object.entries(amapMarkers).forEach(([id,m])=>r.stops.includes(Number(id))?m.show():m.hide());
+ document.querySelectorAll("[data-amap-stop]").forEach(b=>{const id=Number(b.dataset.amapStop);b.classList.toggle("route-hidden",!r.stops.includes(id));b.classList.toggle("active",id===r.stops[0]);});
+ if(amapRouteLine){amapMap.remove(amapRouteLine);amapRouteLine=null;}
+ const path=r.stops.map(id=>amapMarkers[id]).filter(Boolean).map(m=>m.getPosition());
+ if(path.length>1){amapRouteLine=new AMap.Polyline({path,strokeColor:routeColors[key]||"#b94c35",strokeWeight:5,strokeOpacity:.9,lineJoin:"round",showDir:true});amapMap.add(amapRouteLine);}
+ const visible=r.stops.map(id=>amapMarkers[id]).filter(Boolean);
+ if(visible.length)amapMap.setFitView(visible);
+}
 function initAmapMarkers(){
  const box=document.getElementById("amapContainer"),loading=document.getElementById("amapLoading");
  if(!window.AMap){box.style.display="none";document.getElementById("amapFallback").style.display="block";return;}
- const map=new AMap.Map(box,{zoom:15,center:[118.117997,29.321043],viewMode:"2D",resizeEnable:true});
- map.addControl(new AMap.Scale());
+ amapMap=new AMap.Map(box,{zoom:15,center:[118.117997,29.321043],viewMode:"2D",resizeEnable:true});
+ amapMap.addControl(new AMap.Scale());
+ const map=amapMap;
  const info=new AMap.InfoWindow({offset:new AMap.Pixel(0,-42),isCustom:false});
- const markers={};
- const points=[];
+
  function addMarker(item,position){
   const content=`<div class="amap-pin" aria-label="${item.title}">${String(item.id).padStart(2,"0")}</div>`;
   const m=new AMap.Marker({position,content,offset:new AMap.Pixel(-17,-42),title:item.title,anchor:"bottom-center"});
@@ -152,7 +173,7 @@ function initAmapMarkers(){
     info.setContent(`<div style="padding:4px 6px;min-width:190px;line-height:1.7"><b>${item.title}</b><br>${stops[item.id].pill} · ${stops[item.id].time}<br><span style="color:#66766f">${stops[item.id].tip}</span></div>`);
     info.open(map,m);map.setZoomAndCenter(16,position);
   });
-  markers[item.id]=m;points.push({id:item.id,position});map.add(m);
+  amapMarkers[item.id]=m;map.add(m);
  }
  function searchPlace(item){
   return new Promise(resolve=>{
@@ -167,13 +188,11 @@ function initAmapMarkers(){
    });
   });
  }
- Promise.all(amapStops.map(async item=>{const pos=await searchPlace(item);addMarker(item,pos);return {id:item.id,position:pos}})).then(list=>{
-   const path=list.sort((a,b)=>a.id-b.id).map(x=>x.position);
-   if(path.length>1)map.add(new AMap.Polyline({path,strokeColor:"#b94c35",strokeWeight:5,strokeOpacity:.85,lineJoin:"round",showDir:true}));
-   map.setFitView();loading.classList.add("hide");
+ Promise.all(amapStops.map(async item=>{const pos=await searchPlace(item);addMarker(item,pos);return {id:item.id,position:pos}})).then(()=>{
+   updateAmapRoute(currentRoute);loading.classList.add("hide");
  }).catch(()=>{loading.textContent="地图点位加载失败，请刷新页面";});
  document.querySelectorAll("[data-amap-stop]").forEach(btn=>btn.addEventListener("click",()=>{
-   const id=Number(btn.dataset.amapStop);const item=amapStops.find(x=>x.id===id);const m=markers[id];if(!m||!item)return;
+   const id=Number(btn.dataset.amapStop);const item=amapStops.find(x=>x.id===id);const m=amapMarkers[id];if(!m||!item)return;
    document.querySelectorAll("[data-amap-stop]").forEach(b=>b.classList.toggle("active",b===btn));selectStop(id);m.emit("click");
  }));
 }
