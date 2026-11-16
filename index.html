@@ -144,42 +144,46 @@ const amapStops=[
  {id:4,title:"花溪水街",keyword:"篁岭花溪水街",fallback:[118.1191,29.3203]},
  {id:5,title:"梯田花海·垒心桥",keyword:"篁岭垒心桥",fallback:[118.1204,29.3193]}
 ];
-let amapMap=null,amapMarkers={},amapRouteLine=null;const amapPositionCacheKey="huanglingAmapPositionsV1";
+let amapMap=null,amapMarkers={},amapRouteLine=null,amapRouteGlow=null,amapInfo=null,amapStopPositions={};const amapPositionCacheKey="huanglingAmapPositionsV1";
 const routeColors={half:"#b94c35",day:"#263a32",photo:"#d99a2b",study:"#76528f",rain:"#4b8e8f"};
+function makeAmapMarker(item){
+ const num=String(item.id).padStart(2,"0");
+ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50"><path d="M20 48C17 42 5 31 5 19A15 15 0 1 1 35 19C35 31 23 42 20 48Z" fill="#263a32" stroke="#fff" stroke-width="3"/><circle cx="20" cy="19" r="11" fill="#b94c35"/><text x="20" y="24" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#fff">${num}</text></svg>`;
+ const icon="data:image/svg+xml;charset=UTF-8,"+encodeURIComponent(svg);
+ const m=new AMap.Marker({position:amapStopPositions[item.id]||item.fallback,icon,offset:new AMap.Pixel(-20,-48),title:item.title,anchor:"bottom-center"});
+ m.on("click",()=>{
+  selectStop(item.id);document.querySelectorAll("[data-amap-stop]").forEach(b=>b.classList.toggle("active",Number(b.dataset.amapStop)===item.id));
+  if(amapInfo)amapInfo.close();
+  amapInfo=new AMap.InfoWindow({offset:new AMap.Pixel(0,-42),isCustom:false});
+  amapInfo.setContent(`<div style="padding:4px 6px;min-width:190px;line-height:1.7"><b>${item.title}</b><br>${stops[item.id].pill} · ${stops[item.id].time}<br><span style="color:#66766f">${stops[item.id].tip}</span></div>`);
+  amapInfo.open(amapMap,m);amapMap.setZoomAndCenter(16,amapStopPositions[item.id]||item.fallback,true,0);
+ });
+ return m;
+}
 function updateAmapRoute(key){
- if(!amapMap)return;
+ if(!amapMap||Object.keys(amapStopPositions).length<amapStops.length)return;
  const r=routes[key]||routes.day;
- Object.entries(amapMarkers).forEach(([id,m])=>r.stops.includes(Number(id))?m.show():m.hide());
- document.querySelectorAll("[data-amap-stop]").forEach(b=>{const id=Number(b.dataset.amapStop);b.classList.toggle("route-hidden",!r.stops.includes(id));b.classList.toggle("active",id===r.stops[0]);});
- const path=r.stops.map(id=>amapMarkers[id]).filter(Boolean).map(m=>m.getPosition());
+ if(amapInfo)amapInfo.close();
+ amapMap.clearMap();
+ amapMarkers={};amapRouteLine=null;amapRouteGlow=null;
+ const chosen=r.stops.map(id=>amapStops.find(x=>x.id===id)).filter(Boolean);
+ chosen.forEach(item=>{const m=makeAmapMarker(item);amapMarkers[item.id]=m;amapMap.add(m)});
+ const path=chosen.map(item=>amapStopPositions[item.id]||item.fallback);
  const color=routeColors[key]||"#b94c35";
  if(path.length>1){
-  if(!amapRouteLine){amapRouteLine=new AMap.Polyline({path,strokeColor:color,strokeWeight:6,strokeOpacity:.95,lineJoin:"round",showDir:true});amapMap.add(amapRouteLine);}
-  else{amapRouteLine.setPath(path);amapRouteLine.setOptions({strokeColor:color,strokeWeight:6,strokeOpacity:.95});amapRouteLine.show();}
+  amapRouteGlow=new AMap.Polyline({path,strokeColor:color,strokeWeight:16,strokeOpacity:.18,lineJoin:"round"});
+  amapRouteLine=new AMap.Polyline({path,strokeColor:color,strokeWeight:6,strokeOpacity:.95,lineJoin:"round",showDir:true});
+  amapMap.add(amapRouteGlow);amapMap.add(amapRouteLine);
  }
+ document.querySelectorAll("[data-amap-stop]").forEach(b=>{const id=Number(b.dataset.amapStop);b.classList.toggle("route-hidden",!r.stops.includes(id));b.classList.toggle("active",id===r.stops[0]);});
  const badge=document.getElementById("amapRouteBadge");if(badge){badge.textContent=r.name+" · "+r.stops.length+"站";badge.style.background=color;}
- const visible=r.stops.map(id=>amapMarkers[id]).filter(Boolean);
+ const visible=chosen.map(item=>amapMarkers[item.id]).filter(Boolean);
  if(visible.length)amapMap.setFitView(visible,true,[70,70,70,70],16);
 }
 function initAmapMarkers(){
  const box=document.getElementById("amapContainer"),loading=document.getElementById("amapLoading");
  if(!window.AMap){box.style.display="none";loading.classList.add("hide");const fb=document.getElementById("amapFallback"),fr=fb.querySelector("iframe");if(fr&&!fr.src)fr.src=fr.dataset.src;fb.style.display="block";return;}
  amapMap=new AMap.Map(box,{zoom:15,center:[118.117997,29.321043],viewMode:"2D",resizeEnable:false,animateEnable:false,jogEnable:false,mapStyle:"amap://styles/whitesmoke",features:["bg","road","point"]});
- const map=amapMap;
- const info=new AMap.InfoWindow({offset:new AMap.Pixel(0,-42),isCustom:false});
-
- function addMarker(item,position){
-  const num=String(item.id).padStart(2,"0");
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50"><path d="M20 48C17 42 5 31 5 19A15 15 0 1 1 35 19C35 31 23 42 20 48Z" fill="#263a32" stroke="#fff" stroke-width="3"/><circle cx="20" cy="19" r="11" fill="#b94c35"/><text x="20" y="24" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#fff">${num}</text></svg>`;
-  const icon="data:image/svg+xml;charset=UTF-8,"+encodeURIComponent(svg);
-  const m=new AMap.Marker({position,icon,offset:new AMap.Pixel(-20,-48),title:item.title,anchor:"bottom-center"});
-  m.on("click",()=>{
-    selectStop(item.id);document.querySelectorAll("[data-amap-stop]").forEach(b=>b.classList.toggle("active",Number(b.dataset.amapStop)===item.id));
-    info.setContent(`<div style="padding:4px 6px;min-width:190px;line-height:1.7"><b>${item.title}</b><br>${stops[item.id].pill} · ${stops[item.id].time}<br><span style="color:#66766f">${stops[item.id].tip}</span></div>`);
-    info.open(map,m);map.setZoomAndCenter(16,position,true,0);
-  });
-  amapMarkers[item.id]=m;map.add(m);
- }
  function searchPlace(item){
   return new Promise(resolve=>{
    let cache={};try{cache=JSON.parse(localStorage.getItem(amapPositionCacheKey)||"{}")}catch(e){}
@@ -188,19 +192,14 @@ function initAmapMarkers(){
    const service=new AMap.PlaceSearch({city:"婺源",citylimit:true,pageSize:1,extensions:"base"});
    let done=false;const finish=pos=>{if(!done){done=true;const out=pos||item.fallback;cache[item.id]=out;try{localStorage.setItem(amapPositionCacheKey,JSON.stringify(cache))}catch(e){}resolve(out)}};
    const timer=setTimeout(()=>finish(item.fallback),2500);
-   service.search(item.keyword,(status,result)=>{
-    clearTimeout(timer);
-    const poi=result&&result.poiList&&result.poiList.pois&&result.poiList.pois[0];
-    finish(poi&&poi.location?[poi.location.lng,poi.location.lat]:item.fallback);
-   });
+   service.search(item.keyword,(status,result)=>{clearTimeout(timer);const poi=result&&result.poiList&&result.poiList.pois&&result.poiList.pois[0];finish(poi&&poi.location?[poi.location.lng,poi.location.lat]:item.fallback)});
   });
  }
- Promise.all(amapStops.map(async item=>{const pos=await searchPlace(item);addMarker(item,pos);return {id:item.id,position:pos}})).then(()=>{
-   updateAmapRoute(currentRoute);loading.classList.add("hide");
+ Promise.all(amapStops.map(async item=>{const pos=await searchPlace(item);amapStopPositions[item.id]=pos;return pos})).then(()=>{
+  updateAmapRoute(currentRoute);loading.classList.add("hide");
  }).catch(()=>{loading.textContent="地图点位加载失败，请刷新页面";});
  document.querySelectorAll("[data-amap-stop]").forEach(btn=>btn.addEventListener("click",()=>{
-   const id=Number(btn.dataset.amapStop);const item=amapStops.find(x=>x.id===id);const m=amapMarkers[id];if(!m||!item)return;
-   document.querySelectorAll("[data-amap-stop]").forEach(b=>b.classList.toggle("active",b===btn));selectStop(id);m.emit("click");
+   const id=Number(btn.dataset.amapStop),m=amapMarkers[id];if(!m)return;document.querySelectorAll("[data-amap-stop]").forEach(b=>b.classList.toggle("active",b===btn));selectStop(id);m.emit("click");
  }));
 }
 initAmapMarkers();
